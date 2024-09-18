@@ -28,3 +28,4 @@ services:
 networks:
   nginx-network:
     name: nginx-network
+    external: true

@@ -106,9 +106,8 @@ create_nginx_config() {
     else
         location_block="
         location / {
-            return 200 '<html><body style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;"><h1>🔒 SSL Certificate Successfully Installed</h1><div><p>Nginx with Let\'s Encrypt SSL is now configured.</p><p>Your site is ready for HTTPS.</p><p>You can now proceed with your service deployment.</p></div></body></html>';
+            return 200 '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>SSL Certificate Installation Complete</title></head><body style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;"><span style="font-size: 100px;">🔒</span><h1>SSL Certificate Successfully Installed</h1><div style="font-size: 20px;"><p>✅ Nginx with Let\'s Encrypt SSL is now configured.</p><p>🌐 Your site is ready for HTTPS.</p><p>🚀 You can now proceed with your service deployment.</p></div></body></html>';
             add_header Content-Type text/html;
-            charset utf-8;
         }"
     fi
     

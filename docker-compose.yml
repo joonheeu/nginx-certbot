@@ -14,7 +14,6 @@ services:
     command: "/bin/sh -c 'while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g \"daemon off;\"'"
     networks:
       - nginx-network
-      - app-network
 
   certbot:
     image: certbot/certbot
@@ -29,6 +28,3 @@ services:
 networks:
   nginx-network:
     name: nginx-network
-  app-network:
-    name: app-network
-    external: true

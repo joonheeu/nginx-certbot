@@ -58,7 +58,6 @@ create_network() {
 
 # 필요한 Docker 네트워크 생성
 create_network "nginx-network"
-create_network "app-network"
 
 # Docker Compose 확인
 if ! [ -x "$(command -v docker-compose)" ]; then
@@ -74,14 +73,14 @@ if [ -d "$data_path" ]; then
 fi
 
 if [ ! -e "$data_path/conf/options-ssl-nginx.conf" ] || [ ! -e "$data_path/conf/ssl-dhparams.pem" ]; then
-    echo "### 권장 TLS 매개변수 다운로드 중 ..."
+    echo "권장 TLS 매개변수 다운로드 중 ..."
     mkdir -p "$data_path/conf"
     curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > "$data_path/conf/options-ssl-nginx.conf"
     curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$data_path/conf/ssl-dhparams.pem"
     echo
 fi
 
-echo "### $domains에 대한 임시 인증서 생성 중 ..."
+echo "$domains에 대한 임시 인증서 생성 중 ..."
 path="/etc/letsencrypt/live/$domains"
 mkdir -p "$data_path/conf/live/$domains"
 docker-compose run --rm --entrypoint "\
@@ -91,11 +90,11 @@ docker-compose run --rm --entrypoint "\
     -subj '/CN=localhost'" certbot
 echo
 
-echo "### nginx 시작 중 ..."
+echo "nginx 시작 중 ..."
 docker-compose up --force-recreate -d nginx
 echo
 
-echo "### $domains에 대한 임시 인증서 삭제 중 ..."
+echo "$domains에 대한 임시 인증서 삭제 중 ..."
 docker-compose run --rm --entrypoint "\
   rm -Rf /etc/letsencrypt/live/$domains && \
   rm -Rf /etc/letsencrypt/archive/$domains && \
@@ -156,7 +155,7 @@ for domain in "${domains[@]}"; do
     create_nginx_conf "$domain"
 done
 
-log "### Let's Encrypt 인증서 요청 중 ($domains) ..."
+log "Let's Encrypt 인증서 요청 중 ($domains) ..."
 # 도메인 인자 구성
 domain_args=""
 for domain in "${domains[@]}"; do
@@ -182,9 +181,9 @@ docker-compose run --rm --entrypoint "\
     --force-renewal" certbot
 echo
 
-log "### nginx 재시작 중 ..."
+log "nginx 재시작 중 ..."
 docker-compose exec nginx nginx -s reload
 
 log "인증서 발급 및 설정이 완료되었습니다."
-log "필요한 Docker 네트워크가 생성되었습니다. 다른 애플리케이션에서 'app-network'를 사용할 수 있습니다."
+log "필요한 Docker 네트워크가 생성되었습니다. 다른 애플리케이션에서 'nginx-network'를 사용할 수 있습니다."
 log "각 도메인에 대한 Nginx 설정 파일이 data/nginx/ 폴더에 생성되었습니다. 필요에 따라 수정하세요."

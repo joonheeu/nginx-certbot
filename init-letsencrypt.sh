@@ -37,8 +37,9 @@ rsa_key_size=4096
 data_path="./data/certbot"
 staging=0
 
-# CLI 옵션 파싱
+# CLI 옵션 파싱 후에 도메인 설정 파일 확인
 parse_options "$@"
+check_domain_configs
 
 # 필수 옵션 확인
 if [ ${#domains[@]} -eq 0 ]; then
@@ -65,18 +66,11 @@ if ! [ -x "$(command -v docker-compose)" ]; then
     exit 1
 fi
 
-if [ -d "$data_path" ]; then
-    read -p "$domains에 대한 기존 데이터가 발견되었습니다. 계속 진행하여 기존 인증서를 교체하시겠습니까? (y/N) " decision
-    if [ "$decision" != "Y" ] && [ "$decision" != "y" ]; then
-        exit
-    fi
-fi
-
 if [ ! -e "$data_path/conf/options-ssl-nginx.conf" ] || [ ! -e "$data_path/conf/ssl-dhparams.pem" ]; then
     echo "권장 TLS 매개변수 다운로드 중 ..."
     mkdir -p "$data_path/conf"
     curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > "$data_path/conf/options-ssl-nginx.conf"
-    curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$data_path/conf/ssl-dhparams.pem"
+    curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$data_path/conf/ssl-dhparam.pem"
     echo
 fi
 
@@ -106,12 +100,19 @@ create_nginx_conf() {
     local domain=$1
     local conf_file="./data/nginx/${domain}.conf"
     
+    if [ -f "$conf_file" ]; then
+        read -p "${domain}에 대한 Nginx 설정 파일이 이미 존재합니다. 덮어쓰시겠습니까? (y/N) " overwrite_decision
+        if [ "$overwrite_decision" != "Y" ] && [ "$overwrite_decision" != "y" ]; then
+            log "${domain}에 대한 기존 Nginx 설정 파일을 유지합니다."
+            return
+        fi
+    fi
+    
     # 사용자에게 컨테이너 이름 물어보기
     read -p "${domain}에 대해 443 포트로 리다이렉트할 컨테이너 이름을 입력하세요: " container_name
     
-    if [ ! -f "$conf_file" ]; then
-        log "${domain}에 대한 Nginx 설정 파일 생성 중..."
-        cat > "$conf_file" <<EOL
+    log "${domain}에 대한 Nginx 설정 파일 생성 중..."
+    cat > "$conf_file" <<EOL
 server {
     listen 80;
     server_name ${domain};
@@ -144,10 +145,7 @@ server {
     }
 }
 EOL
-        log "${domain}에 대한 Nginx 설정 파일이 생성되었습니다."
-    else
-        log "${domain}에 대한 Nginx 설정 파일이 이미 존재합니다."
-    fi
+    log "${domain}에 대한 Nginx 설정 파일이 생성되었습니다."
 }
 
 # Let's Encrypt 인증서 요청 전에 Nginx 설정 파일 생성

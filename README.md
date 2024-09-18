@@ -1,33 +1,75 @@
-# Boilerplate for nginx with Let’s Encrypt on docker-compose
+# Nginx와 Let's Encrypt를 이용한 자동 SSL 인증서 발급 및 갱신
 
-> This repository is accompanied by a [step-by-step guide on how to
-set up nginx and Let’s Encrypt with Docker](https://medium.com/@pentacent/nginx-and-lets-encrypt-with-docker-in-less-than-5-minutes-b4b8a60d3a71).
+이 프로젝트는 [wmnnd/nginx-certbot](https://github.com/wmnnd/nginx-certbot.git) 저장소를 포크하여 개선한 버전입니다. 원본 프로젝트의 MIT 라이선스를 준수하며, 추가적인 기능과 개선사항을 포함하고 있습니다.
 
-`init-letsencrypt.sh` fetches and ensures the renewal of a Let’s
-Encrypt certificate for one or multiple domains in a docker-compose
-setup with nginx.
-This is useful when you need to set up nginx as a reverse proxy for an
-application.
+Nginx와 Let's Encrypt를 사용하여 SSL 인증서를 자동으로 발급하고 갱신하는 Docker 기반 솔루션을 제공합니다.
 
-## Installation
-1. [Install docker-compose](https://docs.docker.com/compose/install/#install-compose).
+## 주요 기능
 
-2. Clone this repository: `git clone https://github.com/wmnnd/nginx-certbot.git .`
+- 여러 도메인에 대한 SSL 인증서 자동 발급
+- 인증서 자동 갱신
+- Nginx 리버스 프록시 설정 자동화
+- Docker 네트워크 자동 생성
 
-3. Modify configuration:
-- Add domains and email addresses to init-letsencrypt.sh
-- Replace all occurrences of example.org with primary domain (the first one you added to init-letsencrypt.sh) in data/nginx/app.conf
+## 사전 요구 사항
 
-4. Run the init script:
+- Docker
+- Docker Compose
 
-        ./init-letsencrypt.sh
+## 사용 방법
 
-5. Run the server:
+1. 이 저장소를 클론합니다:
 
-        docker-compose up
+   ```
+   git clone https://github.com/joonheeu/nginx-certbot.git
+   cd nginx-certbot
+   ```
 
-## Got questions?
-Feel free to post questions in the comment section of the [accompanying guide](https://medium.com/@pentacent/nginx-and-lets-encrypt-with-docker-in-less-than-5-minutes-b4b8a60d3a71)
+2. `init-letsencrypt.sh` 스크립트를 실행합니다:
 
-## License
-All code in this repository is licensed under the terms of the `MIT License`. For further information please refer to the `LICENSE` file.
+   ```
+   ./init-letsencrypt.sh -d example.com,www.example.com -e your-email@example.com
+   ```
+
+   옵션 설명:
+
+   - `-d`: SSL 인증서를 발급할 도메인 목록 (쉼표로 구분)
+   - `-e`: Let's Encrypt 계정 이메일 주소
+   - `-s`: 스테이징 모드 사용 (선택적, 1: 활성화, 0: 비활성화, 기본값: 0)
+   - `-r`: RSA 키 크기 (선택적, 기본값: 4096)
+
+3. 스크립트 실행 중 각 도메인에 대해 리버스 프록시할 컨테이너 이름을 입력합니다.
+
+4. 인증서 발급이 완료되면 Nginx가 자동으로 시작됩니다.
+
+## 스테이징 모드
+
+스테이징 모드는 Let's Encrypt의 테스트 환경을 사용하여 인증서를 발급합니다. 이 모드는 다음과 같은 이점이 있습니다:
+
+- 실제 인증서 발급 과정을 시뮬레이션하여 설정 오류를 안전하게 확인할 수 있습니다.
+- Let's Encrypt의 실제 서버에 부하를 주지 않고 테스트할 수 있습니다.
+- 실제 환경에서의 속도 제한에 걸리지 않습니다.
+
+스테이징 모드에서 발급된 인증서는 브라우저에서 신뢰하지 않지만, 실제 환경으로 전환하기 전에 모든 설정이 올바른지 확인하는 데 유용합니다.
+
+스테이징 모드를 사용하려면 `-s 1` 옵션을 추가하세요:
+
+## 구조
+
+- `init-letsencrypt.sh`: 초기 설정 스크립트
+- `docker-compose.yml`: Docker 서비스 정의
+- `data/nginx/`: Nginx 설정 파일 저장 디렉토리
+- `data/certbot/`: Let's Encrypt 인증서 및 관련 파일 저장 디렉토리
+
+## 주의사항
+
+- 실제 도메인에서 테스트하기 전에 `-s 1` 옵션을 사용하여 스테이징 환경에서 먼저 테스트하는 것이 좋습니다.
+- 이 스크립트는 도메인이 이미 해당 서버를 가리키고 있다고 가정합니다.
+
+## 기여
+
+이 프로젝트에 기여하고 싶으시다면 풀 리퀘스트를 보내주세요. 모든 기여를 환영합니다!
+
+## 라이선스
+
+이 프로젝트는 MIT 라이선스 하에 배포됩니다. 자세한 내용은 [LICENSE](LICENSE) 파일을 참조하세요.

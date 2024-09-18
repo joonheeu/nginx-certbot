@@ -1,187 +1,205 @@
 #!/bin/bash
-
 set -e
 
-# 로그 함수
-log() {
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+# Constants
+DATA_PATH="./data/certbot"
+RSA_KEY_SIZE=4096
+STAGING=0
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"; }
+
+show_help() {
+    echo "Usage: $0 [-d domain1,domain2,...] [-e email] [-s staging] [-r rsa_key_size]"
+    echo "  -d: Comma-separated list of domains (required)"
+    echo "  -e: Email address (optional, but recommended)"
+    echo "  -s: Use staging server (1: yes, 0: no, default: 0)"
+    echo "  -r: RSA key size (default: 4096)"
+    echo "  -h: Show this help message"
+    exit 0
 }
 
-# CLI 옵션 파싱을 위한 함수
 parse_options() {
     while getopts "d:e:s:r:h" opt; do
         case $opt in
-            d) IFS=',' read -ra domains <<< "$OPTARG" ;;
-            e) email="$OPTARG" ;;
-            s) staging="$OPTARG" ;;
-            r) rsa_key_size="$OPTARG" ;;
+            d) IFS=',' read -ra DOMAINS <<< "$OPTARG" ;;
+            e) EMAIL="$OPTARG" ;;
+            s) STAGING="$OPTARG" ;;
+            r) RSA_KEY_SIZE="$OPTARG" ;;
             h) show_help ;;
-            \?) log "잘못된 옵션: -$OPTARG" >&2; exit 1 ;;
+            \?) log "Invalid option: -$OPTARG" >&2; exit 1 ;;
         esac
     done
 }
 
-# 도움말 표시 함수
-show_help() {
-    echo "사용법: $0 [-d domain1,domain2,...] [-e email] [-s staging] [-r rsa_key_size]"
-    echo "  -d: 쉼표로 구분된 도메인 목록 (필수)"
-    echo "  -e: 이메일 주소 (선택, 하지만 권장)"
-    echo "  -s: 스테이징 모드 (1: 활성화, 0: 비활성화, 기본값: 0)"
-    echo "  -r: RSA 키 크기 (기본값: 4096)"
-    echo "  -h: 이 도움말 표시"
-    exit 0
-}
+check_requirements() {
+    if [ ${#DOMAINS[@]} -eq 0 ]; then
+        log "Error: At least one domain is required." >&2
+        show_help
+    fi
 
-# 기본값 설정
-rsa_key_size=4096
-data_path="./data/certbot"
-staging=0
-
-# CLI 옵션 파싱 후에 도메인 설정 파일 확인
-parse_options "$@"
-check_domain_configs
-
-# 필수 옵션 확인
-if [ ${#domains[@]} -eq 0 ]; then
-    log "오류: 도메인을 지정해야 합니다." >&2
-    show_help
-fi
-
-# Docker 네트워크 생성 함수
-create_network() {
-    if ! docker network inspect $1 >/dev/null 2>&1; then
-        log "네트워크 $1 생성 중..."
-        docker network create $1
-    else
-        log "네트워크 $1 이미 존재합니다."
+    if ! [ -x "$(command -v docker-compose)" ]; then
+        log "Error: docker-compose is not installed. Please refer to https://docs.docker.com/compose/install/#install-compose for installation instructions." >&2
+        exit 1
     fi
 }
 
-# 필요한 Docker 네트워크 생성
-create_network "nginx-network"
+setup_tls_parameters() {
+    if [ ! -e "$DATA_PATH/conf/options-ssl-nginx.conf" ] || [ ! -e "$DATA_PATH/conf/ssl-dhparam.pem" ]; then
+        log "Downloading recommended TLS parameters ..."
+        mkdir -p "$DATA_PATH/conf"
+        curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > "$DATA_PATH/conf/options-ssl-nginx.conf"
+        curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$DATA_PATH/conf/ssl-dhparam.pem"
+    fi
+}
 
-# Docker Compose 확인
-if ! [ -x "$(command -v docker-compose)" ]; then
-    log "오류: docker-compose가 설치되어 있지 않습니다." >&2
-    exit 1
-fi
+create_temp_certificate() {
+    local domain="$1"
+    log "Creating temporary certificate for $domain ..."
+    path="/etc/letsencrypt/live/$domain"
+    mkdir -p "$DATA_PATH/conf/live/$domain"
+    docker-compose run --rm --entrypoint "\
+        openssl req -x509 -nodes -newkey rsa:$RSA_KEY_SIZE -days 1\
+        -keyout '$path/privkey.pem' \
+        -out '$path/fullchain.pem' \
+        -subj '/CN=localhost'" certbot
+}
 
-if [ ! -e "$data_path/conf/options-ssl-nginx.conf" ] || [ ! -e "$data_path/conf/ssl-dhparams.pem" ]; then
-    echo "권장 TLS 매개변수 다운로드 중 ..."
-    mkdir -p "$data_path/conf"
-    curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot-nginx/certbot_nginx/_internal/tls_configs/options-ssl-nginx.conf > "$data_path/conf/options-ssl-nginx.conf"
-    curl -s https://raw.githubusercontent.com/certbot/certbot/master/certbot/certbot/ssl-dhparams.pem > "$data_path/conf/ssl-dhparam.pem"
-    echo
-fi
+delete_temp_certificate() {
+    local domain="$1"
+    log "Deleting temporary certificate for $domain ..."
+    docker-compose run --rm --entrypoint "\
+        rm -Rf /etc/letsencrypt/live/$domain && \
+        rm -Rf /etc/letsencrypt/archive/$domain && \
+        rm -Rf /etc/letsencrypt/renewal/$domain.conf" certbot
+}
 
-echo "$domains에 대한 임시 인증서 생성 중 ..."
-path="/etc/letsencrypt/live/$domains"
-mkdir -p "$data_path/conf/live/$domains"
-docker-compose run --rm --entrypoint "\
-  openssl req -x509 -nodes -newkey rsa:$rsa_key_size -days 1\
-    -keyout '$path/privkey.pem' \
-    -out '$path/fullchain.pem' \
-    -subj '/CN=localhost'" certbot
-echo
-
-echo "nginx 시작 중 ..."
-docker-compose up --force-recreate -d nginx
-echo
-
-echo "$domains에 대한 임시 인증서 삭제 중 ..."
-docker-compose run --rm --entrypoint "\
-  rm -Rf /etc/letsencrypt/live/$domains && \
-  rm -Rf /etc/letsencrypt/archive/$domains && \
-  rm -Rf /etc/letsencrypt/renewal/$domains.conf" certbot
-echo
-
-# Nginx 설정 파일 생성 함수
-create_nginx_conf() {
-    local domain=$1
+create_nginx_config() {
+    local domain="$1"
     local conf_file="./data/nginx/${domain}.conf"
     
     if [ -f "$conf_file" ]; then
-        read -p "${domain}에 대한 Nginx 설정 파일이 이미 존재합니다. 덮어쓰시겠습니까? (y/N) " overwrite_decision
-        if [ "$overwrite_decision" != "Y" ] && [ "$overwrite_decision" != "y" ]; then
-            log "${domain}에 대한 기존 Nginx 설정 파일을 유지합니다."
+        read -p "Nginx config for $domain already exists. Overwrite? (y/N) " overwrite
+        if [[ $overwrite != [yY] ]]; then
+            log "Keeping existing Nginx config for $domain."
             return
         fi
     fi
     
-    # 사용자에게 컨테이너 이름 물어보기
-    read -p "${domain}에 대해 443 포트로 리다이렉트할 컨테이너 이름을 입력하세요: " container_name
+    read -p "Is the target service ready? (y/N) " is_service_ready
+    if [[ $is_service_ready == [yY] ]]; then
+        read -p "Is the target service running in a container? (y/N) " is_container
+        if [[ $is_container == [yY] ]]; then
+            read -p "Enter container name for $domain: " target
+            proxy_pass="http://${target}"
+        else
+            read -p "Enter host IP for $domain: " host_ip
+            read -p "Enter port for $domain: " host_port
+            proxy_pass="http://${host_ip}:${host_port}"
+        fi
+        location_block="
+        location / {
+            proxy_pass  ${proxy_pass};
+            proxy_set_header    Host                \$http_host;
+            proxy_set_header    X-Real-IP           \$remote_addr;
+            proxy_set_header    X-Forwarded-For     \$proxy_add_x_forwarded_for;
+        }"
+    else
+        location_block="
+        location / {
+            return 200 '🔒 SSL Certificate Successfully Installed\n\nNginx with Let\'s Encrypt SSL is now configured.\n\nYour site is ready for HTTPS.\n\nYou can now proceed with your service deployment.';
+            add_header Content-Type text/plain;
+        }"
+    fi
     
-    log "${domain}에 대한 Nginx 설정 파일 생성 중..."
+    log "Creating Nginx config for $domain ..."
     cat > "$conf_file" <<EOL
+# Nginx configuration for ${domain}
+# Created on $(date)
+
+# HTTP server block - redirects all HTTP traffic to HTTPS
 server {
     listen 80;
     server_name ${domain};
     server_tokens off;
 
+    # Allow ACME challenge for Let's Encrypt certificate renewal
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
     }
 
+    # Redirect all HTTP requests to HTTPS
     location / {
         return 301 https://\$host\$request_uri;
     }
 }
 
+# HTTPS server block
 server {
     listen 443 ssl;
     server_name ${domain};
     server_tokens off;
 
+    # SSL certificate configuration
     ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;
     include /etc/letsencrypt/options-ssl-nginx.conf;
     ssl_dhparam /etc/letsencrypt/ssl-dhparam.pem;
 
-    location / {
-        proxy_pass  http://${container_name};
-        proxy_set_header    Host                \$http_host;
-        proxy_set_header    X-Real-IP           \$remote_addr;
-        proxy_set_header    X-Forwarded-For     \$proxy_add_x_forwarded_for;
-    }
+    ${location_block}
 }
 EOL
-    log "${domain}에 대한 Nginx 설정 파일이 생성되었습니다."
+    log "Nginx config for $domain created with comments."
 }
 
-# Let's Encrypt 인증서 요청 전에 Nginx 설정 파일 생성
-for domain in "${domains[@]}"; do
-    create_nginx_conf "$domain"
-done
+request_le_certificate() {
+    log "Requesting Let's Encrypt certificate for ${DOMAINS[*]} ..."
+    
+    local domain_args=""
+    for domain in "${DOMAINS[@]}"; do domain_args="$domain_args -d $domain"; done
+    
+    local email_arg="--register-unsafely-without-email"
+    if [ -n "$EMAIL" ]; then email_arg="--email $EMAIL"; fi
+    
+    local staging_arg=""
+    if [ $STAGING != "0" ]; then staging_arg="--staging"; fi
 
-log "Let's Encrypt 인증서 요청 중 ($domains) ..."
-# 도메인 인자 구성
-domain_args=""
-for domain in "${domains[@]}"; do
-    domain_args="$domain_args -d $domain"
-done
+    docker-compose run --rm --entrypoint "\
+        certbot certonly --webroot -w /var/www/certbot \
+        $staging_arg \
+        $email_arg \
+        $domain_args \
+        --rsa-key-size $RSA_KEY_SIZE \
+        --agree-tos \
+        --force-renewal" certbot
+}
 
-# 이메일 인자 선택
-case "$email" in
-    "") email_arg="--register-unsafely-without-email" ;;
-    *) email_arg="--email $email" ;;
-esac
+main() {
+    parse_options "$@"
+    check_requirements
+    
+    docker network create nginx-network 2>/dev/null || true
+    
+    setup_tls_parameters
+    
+    for domain in "${DOMAINS[@]}"; do
+        create_temp_certificate "$domain"
+    done
+    
+    log "Starting nginx ..."
+    docker-compose up --force-recreate -d nginx
+    
+    for domain in "${DOMAINS[@]}"; do
+        delete_temp_certificate "$domain"
+        create_nginx_config "$domain"
+    done
+    
+    request_le_certificate
+    
+    log "Restarting nginx ..."
+    docker-compose exec nginx nginx -s reload
+    
+    log "Certificate issuance and setup completed."
+    log "Nginx config files for each domain are in data/nginx/. Modify as needed."
+}
 
-# 필요한 경우 스테이징 모드 활성화
-if [ $staging != "0" ]; then staging_arg="--staging"; fi
-
-docker-compose run --rm --entrypoint "\
-  certbot certonly --webroot -w /var/www/certbot \
-    $staging_arg \
-    $email_arg \
-    $domain_args \
-    --rsa-key-size $rsa_key_size \
-    --agree-tos \
-    --force-renewal" certbot
-echo
-
-log "nginx 재시작 중 ..."
-docker-compose exec nginx nginx -s reload
-
-log "인증서 발급 및 설정이 완료되었습니다."
-log "필요한 Docker 네트워크가 생성되었습니다. 다른 애플리케이션에서 'nginx-network'를 사용할 수 있습니다."
-log "각 도메인에 대한 Nginx 설정 파일이 data/nginx/ 폴더에 생성되었습니다. 필요에 따라 수정하세요."
+main "$@"

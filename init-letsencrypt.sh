@@ -90,18 +90,32 @@ create_nginx_config() {
         read -p "Is the target service running in a container? (y/N) " is_container
         if [[ $is_container == [yY] ]]; then
             read -p "Enter container name for $domain: " target
-            proxy_pass="http://${target}"
+            proxy_pass="\$upstream_app"
+            set_upstream="set \$upstream_app ${target};"
         else
             read -p "Enter host IP for $domain: " host_ip
             read -p "Enter port for $domain: " host_port
-            proxy_pass="http://${host_ip}:${host_port}"
+            proxy_pass="${host_ip}:${host_port}"
+            set_upstream=""
         fi
         location_block="
+        # Use Docker's internal DNS
+        resolver 127.0.0.11 valid=30s;
+
         location / {
-            proxy_pass  ${proxy_pass};
+            ${set_upstream}
+            proxy_pass  http://${proxy_pass};
             proxy_set_header    Host                \$http_host;
             proxy_set_header    X-Real-IP           \$remote_addr;
             proxy_set_header    X-Forwarded-For     \$proxy_add_x_forwarded_for;
+
+            # Display alternative HTML if the target service does not respond
+            error_page 502 503 504 = @fallback;
+        }
+
+        location @fallback {
+            return 200 '<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"UTF-8\"><title>Service Under Preparation</title></head><body style=\"display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;\"><span style=\"font-size: 100px;\">🚧</span><h1>Service Under Preparation</h1></body></html>';
+            add_header Content-Type text/html;
         }"
     else
         location_block="
